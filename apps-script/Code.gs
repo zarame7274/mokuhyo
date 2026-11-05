@@ -4,16 +4,18 @@
  * スプレッドシートの「売上目標」シートを読み書きして、Web アプリに JSON を返す。
  * セル位置は tools/make_sheet.py で作るシートに合わせてある。
  *
- * 任意: 「プロジェクトの設定 → スクリプト プロパティ」に PASSCODE を追加すると、
- * 書き込み時にそのパスコードが必要になる（URL を知っているだけの人は書き込めない）。
+ * 必須: 「プロジェクトの設定 → スクリプト プロパティ」に PASSCODE を追加すること。
+ * 閲覧も書き込みもパスコードが合っているときだけ応答する。未設定なら何も返さない。
+ * パスコードは URL に載らないよう、すべて POST の本文で受け取る。
  */
 const SHEET_NAME = '売上目標';
 const FIRST_ROW = 12;
 const LAST_ROW = 42;
 const ROWS = LAST_ROW - FIRST_ROW + 1;
 
+/** 動作確認用。データは返さない。 */
 function doGet() {
-  return json_(readState_());
+  return json_({ ok: true, passcodeConfigured: !!passcode_() });
 }
 
 function doPost(e) {
@@ -23,10 +25,11 @@ function doPost(e) {
   } catch (err) {
     return json_({ error: 'bad_request' });
   }
-  const passcode = PropertiesService.getScriptProperties().getProperty('PASSCODE');
-  if (passcode && String(req.passcode || '') !== passcode) {
-    return json_({ error: 'passcode' });
-  }
+  const passcode = passcode_();
+  if (!passcode) return json_({ error: 'no_passcode_configured' });
+  if (String(req.passcode || '') !== passcode) return json_({ error: 'passcode' });
+
+  if (req.action === 'get') return json_(readState_());
 
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
@@ -141,6 +144,10 @@ function startMonth_(sh, month) {
 }
 
 // ---------- 補助 ----------
+
+function passcode_() {
+  return (PropertiesService.getScriptProperties().getProperty('PASSCODE') || '').trim();
+}
 
 function sheet_() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);

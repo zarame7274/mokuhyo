@@ -32,27 +32,39 @@
 
   // ---------------- 通信 ----------------
 
+  const ERRORS = {
+    passcode: "パスコードが違います。",
+    no_passcode_configured: "管理者がまだパスコードを設定していません（Apps Script のスクリプト プロパティに PASSCODE を追加してください）。",
+  };
+
+  // 読み込み（body なし）も含めてすべて POST。パスコードを URL に載せないため。
   async function api(body) {
     if (DEMO) return demoApi(body);
-    let res;
-    if (body) {
-      res = await fetch(API, {
-        method: "POST",
-        // text/plain にすると Apps Script へのクロスオリジン通信で事前確認が不要になる
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ ...body, passcode: storage.get("stt.pass", "") }),
-      });
-    } else {
-      res = await fetch(API + (API.includes("?") ? "&" : "?") + "t=" + Date.now());
-    }
+    const res = await fetch(API, {
+      method: "POST",
+      // text/plain にすると Apps Script へのクロスオリジン通信で事前確認が不要になる
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ ...(body || { action: "get" }), passcode: storage.get("stt.pass", "") }),
+    });
     if (!res.ok) throw new Error(`通信エラー（${res.status}）`);
     const data = await res.json();
     if (data.error) {
-      const err = new Error(data.error === "passcode" ? "パスコードが違います。設定の一番下で入力してください。" : data.error);
+      const err = new Error(ERRORS[data.error] || data.error);
       err.code = data.error;
       throw err;
     }
     return data;
+  }
+
+  function showGate(on) {
+    const wasShown = !$("gate").hidden;
+    $("gate").hidden = !on;
+    $("main").hidden = on;
+    if (on) {
+      state = null;
+      $("monthLabel").textContent = "パスコードが必要です";
+      if (!wasShown) $("gateInput").focus();
+    }
   }
 
   // デモ用：Apps Script と同じ形のデータをこの端末の中だけで作る
@@ -293,7 +305,7 @@
       if (okMsg) toast(okMsg);
     } catch (e) {
       showError(e.message || "保存できませんでした");
-      if (e.code === "passcode") $("settings").open = true;
+      if (e.code === "passcode") showGate(true);
     } finally {
       setBusy(false);
     }
@@ -301,13 +313,16 @@
 
   async function load() {
     if (busy) return;
+    if (!DEMO && !storage.get("stt.pass", "")) { showGate(true); return; }
     try {
       state = await api(null);
       showError("");
+      showGate(false);
       render();
     } catch (e) {
       showError("読み込めませんでした：" + (e.message || e));
-      if (!state) $("monthLabel").textContent = "読み込みに失敗しました";
+      if (e.code === "passcode") { storage.set("stt.pass", ""); showGate(true); } // 間違ったパスコードで再送し続けない
+      else if (!state) $("monthLabel").textContent = "読み込みに失敗しました";
     }
   }
 
@@ -348,8 +363,21 @@
     if (state) fillSettings();
   });
 
-  $("passInput").value = storage.get("stt.pass", "");
-  $("passSave").addEventListener("click", () => { storage.set("stt.pass", $("passInput").value); toast("パスコードを記憶しました"); });
+  $("gate").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const v = $("gateInput").value.trim();
+    if (!v) return;
+    storage.set("stt.pass", v);
+    $("gateInput").value = "";
+    showError("");
+    load();
+  });
+  $("logoutBtn").addEventListener("click", () => {
+    storage.set("stt.pass", "");
+    $("settings").open = false;
+    showGate(true);
+    toast("この端末からパスコードを消しました");
+  });
 
   $("refreshBtn").addEventListener("click", load);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });

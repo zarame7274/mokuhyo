@@ -24,6 +24,16 @@
   </p>
   <p class="banner error" id="errorBox" hidden></p>
 
+  <form class="card gate" id="gate" hidden autocomplete="off">
+    <h2>パスコードを入力</h2>
+    <p class="hint">管理者から聞いたパスコードを入力してください。この端末に記憶されるので、次回からは入力不要です。</p>
+    <div class="row">
+      <input type="password" id="gateInput" aria-label="パスコード" autocomplete="current-password">
+      <button type="submit">開く</button>
+    </div>
+  </form>
+
+  <main id="main">
   <section class="hero card" aria-live="polite">
     <p class="label" id="heroLabel">今日の目標</p>
     <p class="big" id="heroValue">—</p>
@@ -103,13 +113,11 @@
     </div>
 
     <hr>
-    <h3>パスコード</h3>
-    <p class="hint">管理者がパスコードを設定している場合だけ入力してください。この端末に記憶されます。</p>
-    <div class="row">
-      <input type="password" id="passInput" aria-label="パスコード">
-      <button type="button" class="ghost" id="passSave">記憶する</button>
-    </div>
+    <h3>この端末からパスコードを消す</h3>
+    <p class="hint">共用の端末で使い終わったときや、パスコードが変わったときに使います。</p>
+    <button type="button" class="ghost" id="logoutBtn">パスコードを消す</button>
   </details>
+  </main>
 </div>
 
 <div class="toast" id="toast" role="status" hidden></div>

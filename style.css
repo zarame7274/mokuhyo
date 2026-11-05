@@ -125,6 +125,7 @@ table.days { width: 100%; border-collapse: collapse; font-variant-numeric: tabul
 .neg { color: var(--bad); }
 .days input[type=checkbox] { width: 18px; height: 18px; margin: 0 auto; accent-color: var(--accent); }
 
+.gate { border: 2px solid var(--accent); }
 .settings summary { font-weight: 700; cursor: pointer; }
 .settings form { margin-top: 12px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
