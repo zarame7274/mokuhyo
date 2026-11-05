@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f6f5c">
+<title>売上目標トラッカー</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>売上目標トラッカー</h1>
+      <p class="month" id="monthLabel">読み込み中…</p>
+    </div>
+    <button class="ghost" id="refreshBtn" type="button" aria-label="最新の状態に更新">
+      <span id="syncLabel">更新</span>
+    </button>
+  </header>
+
+  <p class="banner" id="demoBanner" hidden>
+    デモモードです。入力はこの端末にだけ保存されます。スタッフと共有するには <code>config.js</code> に Apps Script の URL を設定してください。
+  </p>
+  <p class="banner error" id="errorBox" hidden></p>
+
+  <section class="hero card" aria-live="polite">
+    <p class="label" id="heroLabel">今日の目標</p>
+    <p class="big" id="heroValue">—</p>
+    <p class="sub" id="heroSub"></p>
+  </section>
+
+  <section class="card">
+    <div class="progress-head">
+      <span>累計 <strong id="totalValue">—</strong></span>
+      <span class="muted">月間目標 <span id="goalValue">—</span></span>
+    </div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="bar"><div id="barFill"></div></div>
+    <dl class="stats">
+      <div><dt>達成率</dt><dd id="rateValue">—</dd></div>
+      <div><dt>残り目標</dt><dd id="remainValue">—</dd></div>
+      <div><dt>残り営業日</dt><dd id="openDaysValue">—</dd></div>
+      <div><dt>1日あたり</dt><dd id="perDayValue">—</dd></div>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>売上を入力</h2>
+    <form id="entryForm" class="entry" autocomplete="off">
+      <label>日付
+        <select id="entryDate"></select>
+      </label>
+      <label>売上金額（円）
+        <input id="entrySales" inputmode="numeric" placeholder="例：120000">
+      </label>
+      <p class="hint" id="entryHint"></p>
+      <div class="actions">
+        <button type="submit" id="saveBtn">保存</button>
+        <button type="button" class="ghost" id="clearBtn" hidden>この日の入力を消す</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>日別の目標と実績</h2>
+    <p class="hint">行をタップするとその日を入力できます。「休」で休業日にすると、目標はほかの日に配分されます。</p>
+    <div class="table-scroll">
+      <table class="days">
+        <thead><tr><th>日付</th><th>目標</th><th>実績</th><th>差額</th><th>休</th></tr></thead>
+        <tbody id="daysBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <details class="card settings" id="settings">
+    <summary>設定</summary>
+    <form id="settingsForm" autocomplete="off">
+      <div class="grid2">
+        <label>単価（円）<input id="setUnit" inputmode="numeric"></label>
+        <label>目標本数（本）<input id="setQty" inputmode="numeric"></label>
+      </div>
+      <p class="hint">月間目標：<strong id="setGoalPreview">—</strong></p>
+      <fieldset>
+        <legend>曜日別の重み（売れる曜日は大きく。1.5 なら平日の1.5倍の目標）</legend>
+        <div class="weights" id="weightInputs"></div>
+      </fieldset>
+      <button type="submit">設定を保存</button>
+    </form>
+
+    <hr>
+    <h3>新しい月を始める</h3>
+    <p class="hint">今月の表をスプレッドシートに「年-月」の名前で保存してから、売上の入力欄を空にします。</p>
+    <div class="row">
+      <input type="month" id="newMonth" aria-label="始める月">
+      <button type="button" class="ghost" id="startMonthBtn">この月を始める</button>
+    </div>
+    <div class="confirm" id="startMonthConfirm" hidden>
+      <p>今月の売上入力を空にします。よろしいですか？（記録はスプレッドシートに残ります）</p>
+      <div class="row">
+        <button type="button" class="danger" id="startMonthYes">始める</button>
+        <button type="button" class="ghost" id="startMonthNo">やめる</button>
+      </div>
+    </div>
+
+    <hr>
+    <h3>パスコード</h3>
+    <p class="hint">管理者がパスコードを設定している場合だけ入力してください。この端末に記憶されます。</p>
+    <div class="row">
+      <input type="password" id="passInput" aria-label="パスコード">
+      <button type="button" class="ghost" id="passSave">記憶する</button>
+    </div>
+  </details>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
