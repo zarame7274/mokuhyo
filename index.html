@@ -35,33 +35,54 @@
 
   <main id="main">
   <section class="hero card" aria-live="polite">
-    <p class="label" id="heroLabel">今日の目標</p>
-    <p class="big" id="heroValue">—</p>
-    <p class="sub" id="heroSub"></p>
-  </section>
-
-  <section class="card">
-    <div class="progress-head">
-      <span>累計 <strong id="totalValue">—</strong></span>
-      <span class="muted">月間目標 <span id="goalValue">—</span></span>
+    <p class="label" id="heroLabel">今日</p>
+    <div class="hero-grid">
+      <div id="hero-sales"><p class="kind">売上</p><p class="big">—</p><p class="sub"></p></div>
+      <div id="hero-qty"><p class="kind">本数</p><p class="big">—</p><p class="sub"></p></div>
     </div>
-    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="bar"><div id="barFill"></div></div>
-    <dl class="stats">
-      <div><dt>達成率</dt><dd id="rateValue">—</dd></div>
-      <div><dt>残り目標</dt><dd id="remainValue">—</dd></div>
-      <div><dt>残り営業日</dt><dd id="openDaysValue">—</dd></div>
-      <div><dt>1日あたり</dt><dd id="perDayValue">—</dd></div>
-    </dl>
   </section>
 
   <section class="card">
-    <h2>売上を入力</h2>
+    <div class="prog" id="prog-sales">
+      <div class="progress-head">
+        <span><strong>売上</strong> 累計 <strong class="total">—</strong></span>
+        <span class="muted">目標 <span class="goal">—</span></span>
+      </div>
+      <div class="bar" role="progressbar" aria-label="売上の達成率" aria-valuemin="0" aria-valuemax="100"><div></div></div>
+      <dl class="stats">
+        <div><dt>達成率</dt><dd class="rate">—</dd></div>
+        <div><dt>残り目標</dt><dd class="remain">—</dd></div>
+        <div><dt>残り営業日</dt><dd class="open">—</dd></div>
+        <div><dt>1日あたり</dt><dd class="per">—</dd></div>
+      </dl>
+    </div>
+    <hr>
+    <div class="prog" id="prog-qty">
+      <div class="progress-head">
+        <span><strong>本数</strong> 累計 <strong class="total">—</strong></span>
+        <span class="muted">目標 <span class="goal">—</span></span>
+      </div>
+      <div class="bar" role="progressbar" aria-label="本数の達成率" aria-valuemin="0" aria-valuemax="100"><div></div></div>
+      <dl class="stats">
+        <div><dt>達成率</dt><dd class="rate">—</dd></div>
+        <div><dt>残り目標</dt><dd class="remain">—</dd></div>
+        <div><dt>残り営業日</dt><dd class="open">—</dd></div>
+        <div><dt>1日あたり</dt><dd class="per">—</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>実績を入力</h2>
     <form id="entryForm" class="entry" autocomplete="off">
-      <label>日付
+      <label class="full">日付
         <select id="entryDate"></select>
       </label>
       <label>売上金額（円）
         <input id="entrySales" inputmode="numeric" placeholder="例：120000">
+      </label>
+      <label>売れた本数（本）
+        <input id="entryQty" inputmode="decimal" placeholder="例：40">
       </label>
       <p class="hint" id="entryHint"></p>
       <div class="actions">
@@ -76,7 +97,7 @@
     <p class="hint">行をタップするとその日を入力できます。「休」で休業日にすると、目標はほかの日に配分されます。</p>
     <div class="table-scroll">
       <table class="days">
-        <thead><tr><th>日付</th><th>目標</th><th>実績</th><th>差額</th><th>休</th></tr></thead>
+        <thead><tr><th>日付</th><th>売上</th><th>本数</th><th>休</th></tr></thead>
         <tbody id="daysBody"></tbody>
       </table>
     </div>
@@ -86,10 +107,10 @@
     <summary>設定</summary>
     <form id="settingsForm" autocomplete="off">
       <div class="grid2">
-        <label>単価（円）<input id="setUnit" inputmode="numeric"></label>
-        <label>目標本数（本）<input id="setQty" inputmode="numeric"></label>
+        <label>月間目標売上（円）<input id="setGoalSales" inputmode="numeric"></label>
+        <label>月間目標本数（本）<input id="setGoalQty" inputmode="numeric"></label>
       </div>
-      <p class="hint">月間目標：<strong id="setGoalPreview">—</strong></p>
+      <p class="hint">平均単価の目安：<strong id="setUnitPreview">—</strong></p>
       <fieldset>
         <legend>曜日別の重み（売れる曜日は大きく。1.5 なら平日の1.5倍の目標）</legend>
         <div class="weights" id="weightInputs"></div>

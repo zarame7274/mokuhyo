@@ -9,10 +9,10 @@
 
   const $ = (id) => document.getElementById(id);
   const yen = (n) => "¥" + Math.round(n).toLocaleString("ja-JP");
-  const signedYen = (n) => (n >= 0 ? "+" : "−") + yen(Math.abs(n));
-  const qty = (n) => n.toLocaleString("ja-JP", { maximumFractionDigits: 1 }) + "本";
+  const qty = (n) => (Math.round(n * 10) / 10).toLocaleString("ja-JP", { maximumFractionDigits: 1 }) + "本";
+  const signed = (fmt) => (n) => (n >= 0 ? "+" : "−") + fmt(Math.abs(n));
   const parseNum = (s) => {
-    const t = String(s).replace(/[,，¥円\s]/g, "").replace(/[０-９．]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+    const t = String(s).replace(/[,，¥円本\s]/g, "").replace(/[０-９．]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
     return t === "" ? null : Number(t);
   };
   const pad = (n) => String(n).padStart(2, "0");
@@ -20,6 +20,13 @@
   const todayStr = () => ymd(new Date());
   const parseYmd = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
   const dayLabel = (s) => { const d = parseYmd(s); return `${d.getMonth() + 1}/${d.getDate()}`; };
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  // 売上と本数は同じ仕組みで別々に目標を計算する
+  const METRICS = [
+    { key: "sales", goalKey: "goalSales", label: "売上", fmt: yen, signed: signed(yen) },
+    { key: "qty", goalKey: "goalQty", label: "本数", fmt: qty, signed: signed(qty) },
+  ];
 
   const storage = {
     get(k, fallback) { try { const v = localStorage.getItem(k); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
@@ -35,6 +42,7 @@
   const ERRORS = {
     passcode: "パスコードが違います。",
     no_passcode_configured: "管理者がまだパスコードを設定していません（Apps Script のスクリプト プロパティに PASSCODE を追加してください）。",
+    unknown_action: "Apps Script が古いままです。最新の Code.gs を貼り付けて、新しいバージョンでデプロイし直してください。",
   };
 
   // 読み込み（body なし）も含めてすべて POST。パスコードを URL に載せないため。
@@ -53,40 +61,40 @@
       err.code = data.error;
       throw err;
     }
-    return data;
-  }
-
-  function showGate(on) {
-    const wasShown = !$("gate").hidden;
-    $("gate").hidden = !on;
-    $("main").hidden = on;
-    if (on) {
-      state = null;
-      $("monthLabel").textContent = "パスコードが必要です";
-      if (!wasShown) $("gateInput").focus();
+    if (data.goalSales === undefined) {
+      throw new Error(ERRORS.unknown_action);
     }
+    return data;
   }
 
   // デモ用：Apps Script と同じ形のデータをこの端末の中だけで作る
   function demoApi(body) {
     const now = new Date();
-    const db = storage.get("stt.demo", null) || {
-      unitPrice: 3000, targetQty: 1000,
+    let db = storage.get("stt.demo", null);
+    if (db && db.unitPrice !== undefined) { // 旧形式（単価×本数）からの引き継ぎ
+      db = { ...db, goalSales: db.unitPrice * db.targetQty, goalQty: db.targetQty, qty: {} };
+      delete db.unitPrice; delete db.targetQty;
+    }
+    db = db || {
+      goalSales: 3000000, goalQty: 1000,
       month: `${now.getFullYear()}-${pad(now.getMonth() + 1)}`,
-      weights: [1, 1, 1, 1, 1, 1, 1], sales: {}, holidays: {},
+      weights: [1, 1, 1, 1, 1, 1, 1], sales: {}, qty: {}, holidays: {},
     };
     if (body) {
-      if (body.action === "setSales") {
-        if (body.sales === null) delete db.sales[body.date]; else db.sales[body.date] = body.sales;
+      if (body.action === "setEntry") {
+        for (const k of ["sales", "qty"]) {
+          if (body[k] === undefined) continue;
+          if (body[k] === null) delete db[k][body.date]; else db[k][body.date] = body[k];
+        }
       } else if (body.action === "setHoliday") {
         if (body.holiday) db.holidays[body.date] = true; else delete db.holidays[body.date];
       } else if (body.action === "setSettings") {
-        Object.assign(db, { unitPrice: body.unitPrice, targetQty: body.targetQty, weights: body.weights });
+        Object.assign(db, { goalSales: body.goalSales, goalQty: body.goalQty, weights: body.weights });
       } else if (body.action === "startMonth") {
-        Object.assign(db, { month: body.month, sales: {}, holidays: {} });
+        Object.assign(db, { month: body.month, sales: {}, qty: {}, holidays: {} });
       }
-      storage.set("stt.demo", db);
     }
+    storage.set("stt.demo", db);
     const [y, m] = db.month.split("-").map(Number);
     const days = [];
     for (let d = new Date(y, m - 1, 1); d.getMonth() === m - 1; d.setDate(d.getDate() + 1)) {
@@ -96,41 +104,49 @@
         date: key, holiday,
         weight: holiday ? 0 : db.weights[(d.getDay() + 6) % 7],
         sales: key in db.sales ? db.sales[key] : null,
+        qty: key in db.qty ? db.qty[key] : null,
       });
     }
-    return Promise.resolve({ ...db, days, updatedAt: new Date().toISOString() });
+    return Promise.resolve({ goalSales: db.goalSales, goalQty: db.goalQty, month: db.month, weights: db.weights, days, updatedAt: new Date().toISOString() });
   }
 
   // ---------------- 計算（スプレッドシートの数式と同じ考え方） ----------------
 
-  function compute(s) {
-    const goal = s.unitPrice * s.targetQty;
-    const days = s.days.map((d) => ({ ...d }));
-    const total = days.reduce((a, d) => a + (d.sales ?? 0), 0);
+  // 「これからの日」= 今日以降で、まだ実績を入れていない日。
+  // 過去の未入力日は 0 として扱い、残り目標を割り振らない（入れ忘れで目標が甘くならないように）。
+  function computeMetric(days, key, goal, today) {
+    const total = days.reduce((a, d) => a + (d[key] ?? 0), 0);
     const remaining = Math.max(0, goal - total);
-    const open = days.filter((d) => d.sales === null);
+    const isOpen = (d) => d[key] === null && d.date >= today;
+    const open = days.filter(isOpen);
     const openWeight = open.reduce((a, d) => a + d.weight, 0);
     const perDay = openWeight ? remaining / openWeight : 0;
-
-    days.forEach((d, i) => {
-      if (!d.weight) d.target = 0;
-      else if (d.sales !== null) {
-        // 実績がある日：その日の朝の時点で見えていた目標
-        const before = days.slice(0, i).reduce((a, x) => a + (x.sales ?? 0), 0);
+    const rows = days.map((d, i) => {
+      let target;
+      if (!d.weight) target = 0;
+      else if (!isOpen(d)) {
+        // 実績がある日・過ぎた日：その日の朝の時点で見えていた目標
+        const before = days.slice(0, i).reduce((a, x) => a + (x[key] ?? 0), 0);
         const weightFrom = days.slice(i).reduce((a, x) => a + x.weight, 0);
-        d.target = weightFrom ? Math.max(0, goal - before) * d.weight / weightFrom : 0;
+        target = weightFrom ? Math.max(0, goal - before) * d.weight / weightFrom : 0;
       } else {
         // まだの日：今の残り目標を重みで配分
-        d.target = perDay * d.weight;
+        target = perDay * d.weight;
       }
-      d.diff = d.sales === null ? null : d.sales - d.target;
+      return { target, actual: d[key], missed: !isOpen(d) && d[key] === null, diff: d[key] === null ? null : d[key] - target };
     });
-
     return {
-      goal, total, remaining, perDay, days,
+      goal, total, remaining, perDay, rows,
       rate: goal ? total / goal : 0,
       openDays: open.filter((d) => d.weight > 0).length,
     };
+  }
+
+  function compute(s) {
+    const out = { days: s.days };
+    const today = todayStr();
+    for (const m of METRICS) out[m.key] = computeMetric(s.days, m.key, s[m.goalKey], today);
+    return out;
   }
 
   // ---------------- 表示 ----------------
@@ -138,60 +154,79 @@
   function render() {
     if (!state) return;
     const c = compute(state);
-    const unit = state.unitPrice || 1;
     const today = todayStr();
     const [y, m] = state.month.split("-").map(Number);
     $("monthLabel").textContent = `${y}年${m}月`;
 
-    // 今日（または次の営業日）の目標
-    const todayRow = c.days.find((d) => d.date === today);
-    const next = c.days.find((d) => d.date >= today && d.sales === null && d.weight > 0);
-    if (todayRow && todayRow.sales !== null) {
-      $("heroLabel").textContent = "今日の実績";
-      $("heroValue").textContent = yen(todayRow.sales);
-      $("heroSub").textContent = `目標 ${yen(todayRow.target)}（${signedYen(todayRow.diff)}）` +
-        (next ? ` ・ 次の目標 ${dayLabel(next.date)} ${yen(next.target)}` : "");
-    } else if (next) {
-      $("heroLabel").textContent = next.date === today ? "今日の目標" : `次の目標（${dayLabel(next.date)}）`;
-      $("heroValue").textContent = yen(next.target);
-      $("heroSub").textContent = `${qty(next.target / unit)} ・ 単価 ${yen(state.unitPrice)}`;
-    } else {
-      $("heroLabel").textContent = "今月の結果";
-      $("heroValue").textContent = yen(c.total);
-      $("heroSub").textContent = `達成率 ${(c.rate * 100).toFixed(1)}%`;
+    // 今日の目標（入力済みなら実績）
+    const ti = c.days.findIndex((d) => d.date === today);
+    $("heroLabel").textContent = ti >= 0
+      ? `今日 ${m}月${parseYmd(today).getDate()}日（${WD[parseYmd(today).getDay()]}）`
+      : "次の営業日";
+    for (const mt of METRICS) {
+      const r = c[mt.key];
+      const box = $("hero-" + mt.key);
+      const todayRow = ti >= 0 ? r.rows[ti] : null;
+      const nextIdx = c.days.findIndex((d, i) => d.date >= today && d.weight > 0 && r.rows[i].actual === null);
+      let big, sub;
+      if (todayRow && todayRow.actual !== null) {
+        big = mt.fmt(todayRow.actual);
+        sub = `実績 ・ 目標 ${mt.fmt(todayRow.target)}（${mt.signed(todayRow.diff)}）`;
+      } else if (nextIdx >= 0) {
+        big = mt.fmt(r.rows[nextIdx].target);
+        sub = c.days[nextIdx].date === today ? "目標" : `目標（${dayLabel(c.days[nextIdx].date)}）`;
+      } else {
+        big = mt.fmt(r.total);
+        sub = `今月の結果 ・ 達成率 ${(r.rate * 100).toFixed(1)}%`;
+      }
+      box.querySelector(".big").textContent = big;
+      box.querySelector(".sub").textContent = sub;
     }
 
-    $("totalValue").textContent = `${yen(c.total)}（${qty(c.total / unit)}）`;
-    $("goalValue").textContent = `${yen(c.goal)}（${qty(state.targetQty)}）`;
-    const pct = Math.min(100, c.rate * 100);
-    $("barFill").style.width = pct + "%";
-    $("bar").setAttribute("aria-valuenow", pct.toFixed(0));
-    $("rateValue").textContent = (c.rate * 100).toFixed(1) + "%";
-    $("remainValue").textContent = yen(c.remaining);
-    $("openDaysValue").textContent = c.openDays + "日";
-    $("perDayValue").textContent = `${yen(c.perDay)} / ${qty(c.perDay / unit)}`;
+    // 進み具合
+    for (const mt of METRICS) {
+      const r = c[mt.key];
+      const p = $("prog-" + mt.key);
+      p.querySelector(".total").textContent = mt.fmt(r.total);
+      p.querySelector(".goal").textContent = mt.fmt(r.goal);
+      const pct = Math.min(100, r.rate * 100);
+      const bar = p.querySelector(".bar");
+      bar.firstElementChild.style.width = pct + "%";
+      bar.setAttribute("aria-valuenow", pct.toFixed(0));
+      p.querySelector(".rate").textContent = (r.rate * 100).toFixed(1) + "%";
+      p.querySelector(".remain").textContent = mt.fmt(r.remaining);
+      p.querySelector(".open").textContent = r.openDays + "日";
+      p.querySelector(".per").textContent = mt.fmt(r.perDay);
+    }
 
     // 日別テーブル
-    const body = $("daysBody");
-    body.replaceChildren(...c.days.map((d) => {
+    $("daysBody").replaceChildren(...c.days.map((d, i) => {
       const tr = document.createElement("tr");
       const wd = parseYmd(d.date).getDay();
       tr.dataset.date = d.date;
       if (d.date === today) tr.classList.add("today");
       if (!d.weight) tr.classList.add("off");
       if (d.date === selectedDate) tr.classList.add("selected");
-      const cells = [
-        `${dayLabel(d.date)} <span class="${wd === 0 ? "sun" : wd === 6 ? "sat" : ""}">${WD[wd]}</span>`,
-        d.weight ? yen(d.target) : "休",
-        d.sales === null ? "" : yen(d.sales),
-        d.diff === null ? "" : `<span class="${d.diff >= 0 ? "pos" : "neg"}">${signedYen(d.diff)}</span>`,
-      ];
-      cells.forEach((html) => { const td = document.createElement("td"); td.innerHTML = html; tr.append(td); });
+      const tdDate = document.createElement("td");
+      tdDate.innerHTML = `${dayLabel(d.date)} <span class="${wd === 0 ? "sun" : wd === 6 ? "sat" : ""}">${WD[wd]}</span>`;
+      tr.append(tdDate);
+      for (const mt of METRICS) {
+        const r = c[mt.key].rows[i];
+        const td = document.createElement("td");
+        if (!d.weight && r.actual === null) td.innerHTML = `<span class="muted">休</span>`;
+        else {
+          const main = r.actual !== null ? esc(mt.fmt(r.actual))
+            : r.missed ? `<span class="neg">未入力</span>` : `<span class="muted">—</span>`;
+          const diff = r.diff === null ? "" : ` <span class="${r.diff >= 0 ? "pos" : "neg"}">${esc(mt.signed(r.diff))}</span>`;
+          td.innerHTML = `<div>${main}</div><div class="small">目標 ${esc(mt.fmt(r.target))}${diff}</div>`;
+        }
+        tr.append(td);
+      }
       const td = document.createElement("td");
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = d.holiday;
-      cb.disabled = !d.holiday && d.weight === 0; // 重み0の曜日は設定側で管理
+      cb.disabled = busy || (!d.holiday && d.weight === 0); // 重み0の曜日は設定側で管理
       cb.setAttribute("aria-label", `${dayLabel(d.date)}を休業日にする`);
       cb.addEventListener("click", (e) => e.stopPropagation());
       cb.addEventListener("change", () => send({ action: "setHoliday", date: d.date, holiday: cb.checked }, cb.checked ? "休業日にしました" : "営業日に戻しました"));
@@ -208,12 +243,13 @@
     sel.replaceChildren(...c.days.map((d) => {
       const o = document.createElement("option");
       o.value = d.date;
-      o.textContent = `${dayLabel(d.date)}（${WD[parseYmd(d.date).getDay()]}）` + (d.sales !== null ? " ✓" : "");
+      const done = d.sales !== null || d.qty !== null;
+      o.textContent = `${dayLabel(d.date)}（${WD[parseYmd(d.date).getDay()]}）` + (done ? " ✓" : "");
       return o;
     }));
     if (keep) { sel.value = keep; if (selectedDate !== keep) selectDate(keep, false); }
     const selRow = c.days.find((d) => d.date === selectedDate);
-    $("clearBtn").hidden = !(selRow && selRow.sales !== null);
+    $("clearBtn").hidden = !(selRow && (selRow.sales !== null || selRow.qty !== null));
     updateEntryHint();
 
     // 設定（入力中は上書きしない）
@@ -228,7 +264,8 @@
     $("entryDate").value = date;
     const row = state.days.find((d) => d.date === date);
     $("entrySales").value = row && row.sales !== null ? row.sales : "";
-    $("clearBtn").hidden = !(row && row.sales !== null);
+    $("entryQty").value = row && row.qty !== null ? row.qty : "";
+    $("clearBtn").hidden = !(row && (row.sales !== null || row.qty !== null));
     document.querySelectorAll("#daysBody tr").forEach((tr) => tr.classList.toggle("selected", tr.dataset.date === date));
     updateEntryHint();
     if (scroll) { $("entryForm").scrollIntoView({ behavior: "smooth", block: "center" }); $("entrySales").focus({ preventScroll: true }); }
@@ -237,18 +274,17 @@
   function updateEntryHint() {
     if (!state) return;
     const c = compute(state);
-    const d = c.days.find((x) => x.date === $("entryDate").value);
-    const v = parseNum($("entrySales").value);
-    const unit = state.unitPrice || 1;
+    const i = c.days.findIndex((x) => x.date === $("entryDate").value);
     const parts = [];
-    if (d && d.weight) parts.push(`この日の目標 ${yen(d.target)}`);
-    if (v !== null && !Number.isNaN(v)) parts.push(`入力額 ≒ ${qty(v / unit)}`);
-    $("entryHint").textContent = parts.join(" ・ ");
+    if (i >= 0 && c.days[i].weight) parts.push(`この日の目標 ${yen(c.sales.rows[i].target)} ・ ${qty(c.qty.rows[i].target)}`);
+    const s = parseNum($("entrySales").value), q = parseNum($("entryQty").value);
+    if (s > 0 && q > 0) parts.push(`平均単価 ${yen(s / q)}`);
+    $("entryHint").textContent = parts.join(" ／ ");
   }
 
   function fillSettings() {
-    $("setUnit").value = state.unitPrice;
-    $("setQty").value = state.targetQty;
+    $("setGoalSales").value = state.goalSales;
+    $("setGoalQty").value = state.goalQty;
     const box = $("weightInputs");
     if (!box.children.length) {
       WD_MON_FIRST.forEach((w, i) => {
@@ -269,8 +305,8 @@
   }
 
   function updateGoalPreview() {
-    const u = parseNum($("setUnit").value), q = parseNum($("setQty").value);
-    $("setGoalPreview").textContent = u && q ? yen(u * q) : "—";
+    const s = parseNum($("setGoalSales").value), q = parseNum($("setGoalQty").value);
+    $("setUnitPreview").textContent = s > 0 && q > 0 ? yen(s / q) : "—";
   }
 
   // ---------------- 操作 ----------------
@@ -279,6 +315,17 @@
     const box = $("errorBox");
     box.textContent = msg || "";
     box.hidden = !msg;
+  }
+
+  function showGate(on) {
+    const wasShown = !$("gate").hidden;
+    $("gate").hidden = !on;
+    $("main").hidden = on;
+    if (on) {
+      state = null;
+      $("monthLabel").textContent = "パスコードが必要です";
+      if (!wasShown) $("gateInput").focus();
+    }
   }
 
   let toastTimer;
@@ -292,23 +339,26 @@
 
   function setBusy(b) {
     busy = b;
-    document.querySelectorAll("button, select, input").forEach((el) => { el.disabled = b; });
+    document.querySelectorAll("#main button, #main select, #main input").forEach((el) => { el.disabled = b; });
     if (!b) render(); // 休業日チェックの有効/無効は render で決め直す
   }
 
   async function send(body, okMsg) {
-    if (busy) return;
+    if (busy) return false;
     setBusy(true);
+    let ok = false;
     try {
       state = await api(body);
       showError("");
       if (okMsg) toast(okMsg);
+      ok = true;
     } catch (e) {
       showError(e.message || "保存できませんでした");
       if (e.code === "passcode") showGate(true);
     } finally {
       setBusy(false);
     }
+    return ok;
   }
 
   async function load() {
@@ -326,28 +376,38 @@
     }
   }
 
+  function readEntry(id, label) {
+    const v = parseNum($(id).value);
+    if (v !== null && (Number.isNaN(v) || v < 0)) throw new Error(`${label}は0以上の数字で入力してください`);
+    return v;
+  }
+
   $("entryDate").addEventListener("change", (e) => selectDate(e.target.value, false));
   $("entrySales").addEventListener("input", updateEntryHint);
+  $("entryQty").addEventListener("input", updateEntryHint);
   $("entryForm").addEventListener("submit", (e) => {
     e.preventDefault();
-    const v = parseNum($("entrySales").value);
-    if (v === null || Number.isNaN(v) || v < 0) { showError("売上金額を数字で入力してください"); return; }
-    send({ action: "setSales", date: $("entryDate").value, sales: v }, `${dayLabel($("entryDate").value)} の売上を保存しました`);
+    let sales, q;
+    try { sales = readEntry("entrySales", "売上金額"); q = readEntry("entryQty", "本数"); }
+    catch (err) { showError(err.message); return; }
+    if (sales === null && q === null) { showError("売上金額か本数を入力してください（消すときは「この日の入力を消す」）"); return; }
+    const date = $("entryDate").value;
+    send({ action: "setEntry", date, sales, qty: q }, `${dayLabel(date)} の実績を保存しました`);
   });
   $("clearBtn").addEventListener("click", () =>
-    send({ action: "setSales", date: $("entryDate").value, sales: null }, "入力を消しました"));
+    send({ action: "setEntry", date: $("entryDate").value, sales: null, qty: null }, "入力を消しました"));
 
-  $("setUnit").addEventListener("input", updateGoalPreview);
-  $("setQty").addEventListener("input", updateGoalPreview);
+  $("setGoalSales").addEventListener("input", updateGoalPreview);
+  $("setGoalQty").addEventListener("input", updateGoalPreview);
   $("settingsForm").addEventListener("submit", (e) => {
     e.preventDefault();
-    const unitPrice = parseNum($("setUnit").value), targetQty = parseNum($("setQty").value);
+    const goalSales = parseNum($("setGoalSales").value), goalQty = parseNum($("setGoalQty").value);
     const weights = WD_MON_FIRST.map((_, i) => parseNum($("w" + i).value));
-    if (!(unitPrice > 0) || !(targetQty > 0)) { showError("単価と目標本数は1以上の数字にしてください"); return; }
+    if (!(goalSales > 0) || !(goalQty > 0)) { showError("月間目標売上と月間目標本数は1以上の数字にしてください"); return; }
     if (weights.some((w) => w === null || Number.isNaN(w) || w < 0)) { showError("曜日の重みは0以上の数字にしてください"); return; }
     if (weights.every((w) => w === 0)) { showError("すべての曜日を0にはできません"); return; }
     document.activeElement?.blur();
-    send({ action: "setSettings", unitPrice, targetQty, weights }, "設定を保存しました");
+    send({ action: "setSettings", goalSales, goalQty, weights }, "設定を保存しました");
   });
 
   $("startMonthBtn").addEventListener("click", () => {
@@ -358,9 +418,10 @@
   $("startMonthYes").addEventListener("click", async () => {
     $("startMonthConfirm").hidden = true;
     selectedDate = null;
-    await send({ action: "startMonth", month: $("newMonth").value }, "新しい月を始めました");
-    $("newMonth").value = "";
-    if (state) fillSettings();
+    if (await send({ action: "startMonth", month: $("newMonth").value }, "新しい月を始めました")) {
+      $("newMonth").value = "";
+      fillSettings();
+    }
   });
 
   $("gate").addEventListener("submit", (e) => {
